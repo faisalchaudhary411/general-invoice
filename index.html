@@ -257,6 +257,13 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
     <p class="hint" style="margin-top:6px">Everything printed on your invoices comes from here. Changes save automatically.</p>
     <label data-t="lblBizName">Business Name</label><input id="bizName" placeholder="Your business name" oninput="bizLive()" onchange="saveBizInfo(true)">
     <label data-t="lblTagline">Tagline</label><input id="bizTagline" placeholder="e.g. General Store" oninput="bizLive()" onchange="saveBizInfo(true)">
+    <label>Business type — set once, it decides which product fields you see</label>
+    <select id="bizType" onchange="bizTypeChanged();saveBizInfo(true)">
+      <option value="general">General store</option><option value="grocery">Grocery / Kiryana</option><option value="pharmacy">Pharmacy / Medical store</option>
+      <option value="hardware">Electric &amp; Hardware</option><option value="mobile">Mobile &amp; Electronics</option><option value="garments">Garments / Cloth</option>
+      <option value="cosmetics">Cosmetics &amp; Beauty</option><option value="stationery">Stationery &amp; Books</option><option value="other">Other…</option>
+    </select>
+    <div id="bizTypeOtherW" class="hidden"><label>Your business type</label><input id="bizTypeOther" placeholder="e.g. Pet shop" onchange="saveBizInfo(true)"></div>
     <label data-t="lblAddress">Business Address</label><input id="bizAddress" placeholder="Shop / street / area" onchange="saveBizInfo(true)">
     <label>City (printed on the stamp)</label><input id="bizCity" placeholder="e.g. your city" oninput="bizLive()" onchange="saveBizInfo(true)">
     <label data-t="lblPhone">Phone numbers (separate with ·)</label><input id="bizPhone" placeholder="0300 0000000 · 0311 0000000" onchange="saveBizInfo(true)">
@@ -523,6 +530,8 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
       <button class="btn b-ghost" onclick="bulkOpen()">📥 Bulk add / CSV</button>
       <button class="btn b-ghost" onclick="adjOpen()">％ Change prices</button>
     </div>
+    <button class="btn b-ghost" style="width:100%;margin-top:8px" onclick="lbOpen()">🏷 Print barcode labels</button>
+    <p class="hint" id="stkNature" style="margin:8px 0 0"></p>
   </div>
   <div class="card">
     <input id="stkSearch" placeholder="Search name, barcode, category..." oninput="STK.limit=80;renderStock()" style="margin-bottom:8px">
@@ -597,15 +606,15 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
   <div class="hint" id="pMarg" style="margin:4px 0 0;font-weight:700"></div>
   <div class="row"><div><label>Stock in hand</label><input id="pStock" type="number" inputmode="decimal" step="any" placeholder="0"></div><div><label>Unit</label><input id="pUnit" list="unitList" placeholder="pcs"></div></div>
   <datalist id="unitList"><option>pcs</option><option>kg</option><option>g</option><option>litre</option><option>ml</option><option>meter</option><option>box</option><option>pack</option><option>strip</option><option>tablet</option><option>bottle</option><option>dozen</option></datalist>
-  <div class="row"><div><label>Category</label><input id="pCat" list="catList" placeholder="e.g. Medicine, Grocery"></div><div><label>Alert when stock ≤</label><input id="pMin" type="number" inputmode="decimal" min="0" placeholder="0"></div></div>
+  <label>Alert me when stock is at or below</label><input id="pMin" type="number" inputmode="decimal" min="0" placeholder="0 = only when finished">
   <datalist id="catList"></datalist>
   <label class="ck"><input type="checkbox" id="pTrack" checked><span>Count stock (goes down when sold)</span></label>
-  <details id="pMore" style="margin-top:8px"><summary style="font-weight:800;font-size:.84rem;color:var(--navy);cursor:pointer">💊 Expiry, batch &amp; generic name</summary>
-    <div class="row"><div><label>Expiry date</label><input id="pExp" type="date"></div><div><label>Batch no.</label><input id="pBatch" placeholder="Batch"></div></div>
-    <label>Generic / salt name</label><input id="pGen" placeholder="e.g. Paracetamol">
-  </details>
+  <div id="pMore" style="margin-top:6px;border-top:1px solid var(--line);padding-top:4px">
+    <div class="row"><div id="pExpW"><label id="pTitleExp">Expiry date</label><input id="pExp" type="date"></div><div id="pBatchW"><label>Batch no.</label><input id="pBatch" placeholder="Batch"></div></div>
+    <div id="pGenW"><label>Generic / salt name</label><input id="pGen" placeholder="e.g. Paracetamol"></div>
+  </div>
   <div class="grid2" style="margin-top:14px"><button class="btn b-ghost" onclick="prodClose()">Cancel</button><button class="btn b-navy" onclick="prodSaveForm()">💾 Save</button></div>
-  <div class="grid2" id="pExtra" style="margin-top:8px"><button class="btn b-ghost" onclick="stockInOpen(el('pId').value)">➕ Add stock</button><button class="btn b-ghost" onclick="labelPng(el('pId').value)">🏷 Barcode label</button></div>
+  <div class="grid2" id="pExtra" style="margin-top:8px"><button class="btn b-ghost" onclick="stockInOpen(el('pId').value)">➕ Add stock</button><button class="btn b-ghost" onclick="lbFromProduct(el('pId').value)">🏷 Barcode label</button></div>
   <button class="btn b-red" id="pDel" style="width:100%;margin-top:8px" onclick="prodDelete()">🗑 Delete product</button>
 </div></div>
 <!-- stock in modal -->
@@ -620,7 +629,7 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
 <!-- bulk modal -->
 <div class="mdl hidden" id="bulkModal" onclick="if(event.target===this)bulkClose()"><div class="box">
   <h2>Bulk add products</h2>
-  <p class="hint" style="margin:0 0 6px">One product per line: <b>Name, Sale price, Cost, Stock, Barcode, Category</b>. Only name and price are required. You can paste straight from Excel / Google Sheets.</p>
+  <p class="hint" style="margin:0 0 6px">One product per line: <b>Name, Sale price, Cost, Stock, Barcode</b> (an optional 6th column can hold a category). Only name and price are required. You can paste straight from Excel / Google Sheets.</p>
   <textarea id="bkText" rows="7" placeholder="Panadol 500mg, 30, 22, 100, 6001234567890, Medicine&#10;Sugar 1kg, 180, 165, 50&#10;Dettol 250ml, 350"></textarea>
   <label class="ck"><input type="checkbox" id="bkAdd"><span>Add the stock numbers to existing stock (instead of replacing)</span></label>
   <button class="btn b-navy" style="width:100%;margin-top:10px" onclick="bulkRun()">✅ Add / update products</button>
@@ -647,6 +656,47 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
     <button class="btn b-red" style="width:100%;margin-top:8px" onclick="camClose()">✕ Done</button>
   </div>
 </div>
+
+<!-- barcode label maker -->
+<div class="mdl hidden" id="lblModal" onclick="if(event.target===this)lbClose()"><div class="box">
+  <h2>🏷 Barcode labels</h2>
+  <p class="hint" style="margin:0 0 6px">Choose products or make a custom label, set copies and size, then print on your Bluetooth printer or an A4 sheet.</p>
+  <label>Add a product</label>
+  <div class="scanbar" style="margin:0"><input id="lbSearch" placeholder="Search product name or barcode…" oninput="lbSuggest()" onfocus="lbSuggest()" autocomplete="off"><button type="button" class="btn b-ghost" onclick="lbAddAll()">All</button></div>
+  <div id="lbSug"></div>
+  <label class="ck"><input type="checkbox" id="lbStock" onchange="lbCfgRead()"><span>Number of copies = stock in hand (when adding)</span></label>
+  <details style="margin-top:8px"><summary style="font-weight:800;font-size:.84rem;color:var(--navy);cursor:pointer">✏️ Custom label (any text or number)</summary>
+    <label>Barcode text / number *</label>
+    <div class="scanbar" style="margin:0"><input id="lbcCode" placeholder="e.g. 12345 or SHELF-A1"><button type="button" class="btn b-ghost" onclick="el('lbcCode').value=genCode()" title="Make a new barcode">🎲</button></div>
+    <label>Title line (optional)</label><input id="lbcTitle" placeholder="Item name or any text">
+    <div class="row"><div><label>Price text (optional)</label><input id="lbcPrice" placeholder="Rs 150"></div><div><label>Copies</label><input id="lbcCopies" type="number" min="1" value="1" inputmode="numeric"></div></div>
+    <button class="btn b-ghost" style="width:100%;margin-top:8px" onclick="lbAddCustom()">＋ Add custom label</button>
+  </details>
+  <button class="btn b-ghost b-sm" style="margin-top:8px" onclick="lbGenMissing()">🎲 Make barcodes for products that have none</button>
+  <label>Labels to print</label>
+  <div id="lbQueue"></div>
+  <div class="hint" id="lbCount" style="font-weight:700"></div>
+  <button class="btn b-ghost b-sm" style="margin-top:4px" onclick="lbClear()">Clear list</button>
+  <label>Barcode type</label>
+  <select id="lbType" onchange="lbCfgRead()"><option value="auto">Auto (best for the code)</option><option value="code128">Code 128 (any text / numbers)</option><option value="ean13">EAN-13 (13 digits, shops)</option><option value="ean8">EAN-8 (8 digits)</option><option value="code39">Code 39 (capitals + numbers)</option><option value="qr">QR code</option></select>
+  <label>Label size</label><select id="lbSize" onchange="lbCfgRead()"></select>
+  <label>Show on the label</label>
+  <div class="row" style="gap:4px 12px">
+    <label class="ck" style="margin:2px 0"><input type="checkbox" id="lbBiz" onchange="lbCfgRead()"><span>Business name</span></label>
+    <label class="ck" style="margin:2px 0"><input type="checkbox" id="lbName" onchange="lbCfgRead()"><span>Product name</span></label>
+    <label class="ck" style="margin:2px 0"><input type="checkbox" id="lbPrice" onchange="lbCfgRead()"><span>Price</span></label>
+    <label class="ck" style="margin:2px 0"><input type="checkbox" id="lbCode" onchange="lbCfgRead()"><span>Code number</span></label>
+  </div>
+  <div class="row"><div><label>Text size</label><select id="lbTxt" onchange="lbCfgRead()"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></div><div><label>Extra line (optional)</label><input id="lbExtra" placeholder="e.g. Made in Pakistan" oninput="lbCfgRead()"></div></div>
+  <label class="ck"><input type="checkbox" id="lbCut" onchange="lbCfgRead()"><span>Dotted cut lines between labels</span></label>
+  <label>Preview</label>
+  <div style="background:#eef2f7;border-radius:12px;padding:10px;text-align:center"><canvas id="lbPrev" style="max-width:100%;background:#fff;border:1px solid var(--line)"></canvas></div>
+  <div class="hint" id="lbMsg" style="font-weight:700;color:#92400e"></div>
+  <div id="lbBtRow" class="grid2" style="margin-top:10px"><button class="btn b-green" onclick="lbPrintBt()">⚡ Print on Bluetooth printer</button><button class="btn b-ghost" onclick="lbDownloadPng()">⬇️ Download PNG</button></div>
+  <div id="lbA4Row" class="grid2 hidden" style="margin-top:10px"><button class="btn b-green" onclick="lbPrintSystem()">🖨 Print (phone / printer)</button><button class="btn b-ghost" onclick="lbDownloadPdf()">⬇️ Download PDF</button></div>
+  <p class="prst" id="lbStatus"></p>
+  <button class="btn b-ghost" style="width:100%;margin-top:8px" onclick="lbClose()">Close</button>
+</div></div>
 <!-- supplier modal -->
 <div class="mdl hidden" id="supModal" onclick="if(event.target===this)supClose()"><div class="box">
   <h2 id="supModalTitle">Add Supplier</h2>
@@ -1018,7 +1068,7 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
 </script>
 <script>
 const SRC_HTML='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
-const APP_VER="custom-20261015c";
+const APP_VER="custom-20261015d";
 
 /* ---- colours come from Business details ---- */
 const TH={dark:'#1f2937',mid:'#374151',acc:'#0d9488',acc2:'#2dd4bf'};
@@ -3469,6 +3519,32 @@ function prodQuickSet(name,price){
 }
 function payFull(){el('advance').value=invoiceTotal().grand;recalcPay()}
 
+
+/* ---------------- business type (asked once in Business details) ---------------- */
+const BTYPES={
+ general:{n:'General store',exp:true,batch:false,gen:false,unit:'pcs'},
+ grocery:{n:'Grocery / Kiryana',exp:true,batch:false,gen:false,unit:'pcs'},
+ pharmacy:{n:'Pharmacy / Medical store',exp:true,batch:true,gen:true,unit:'strip'},
+ hardware:{n:'Electric & Hardware',exp:false,batch:false,gen:false,unit:'pcs'},
+ mobile:{n:'Mobile & Electronics',exp:false,batch:false,gen:false,unit:'pcs'},
+ garments:{n:'Garments / Cloth',exp:false,batch:false,gen:false,unit:'pcs'},
+ cosmetics:{n:'Cosmetics & Beauty',exp:true,batch:false,gen:false,unit:'pcs'},
+ stationery:{n:'Stationery & Books',exp:false,batch:false,gen:false,unit:'pcs'},
+ other:{n:'Other',exp:false,batch:false,gen:false,unit:'pcs'}
+};
+function bizTypeKey(){const k=(bizGet().btype||'');return BTYPES[k]?k:'general'}
+function bizNature(){return BTYPES[bizTypeKey()]}
+function bizTypeName(){const b=bizGet(),k=bizTypeKey();return k==='other'&&(b.bother||'').trim()?b.bother.trim():BTYPES[k].n}
+function bizTypeChanged(){
+  el('bizTypeOtherW').classList.toggle('hidden',v('bizType')!=='other');
+}
+function applyNature(){
+  const n=bizNature();
+  el('pExpW').classList.toggle('hidden',!n.exp);el('pBatchW').classList.toggle('hidden',!n.batch);el('pGenW').classList.toggle('hidden',!n.gen);
+  el('pMore').classList.toggle('hidden',!(n.exp||n.batch||n.gen));
+  el('pTitleExp').textContent=n.batch?'Medicine details':'Expiry';
+}
+
 /* ---------------- beep ---------------- */
 let _ac=null;
 function beep(ok){
@@ -3623,6 +3699,9 @@ function renderStock(){
   if(!el('stkList'))return;
   const cs=cats(),sel=el('stkCat'),cur=sel.value;
   sel.innerHTML='<option value="">All categories</option>'+cs.map(c=>`<option>${esc(c)}</option>`).join('');sel.value=cs.includes(cur)?cur:'';
+  sel.style.display=cs.length?'':'none';sel.parentElement.style.gridTemplateColumns=cs.length?'':'1fr';
+  el('stkExp').parentElement.style.display=bizNature().exp?'':'none';
+  el('stkNature').textContent='Business type: '+bizTypeName()+' (change it in Business details on the Invoice tab)';
   el('catList').innerHTML=cs.map(c=>`<option>${esc(c)}</option>`).join('');
   el('optAuto').checked=lsGet(AUTOADD_KEY)!=='0';
   let val=0,low=0,exp=0;
@@ -3660,11 +3739,10 @@ function prodEdit(id,opts){
   el('pId').value=p?p.id:'';
   el('pName').value=p?p.name:(opts.name||'');el('pBar').value=p?(p.barcode||''):(opts.barcode||'');
   el('pPrice').value=p&&p.price?p.price:'';el('pCost').value=p&&p.cost?p.cost:'';
-  el('pStock').value=p&&p.stock?p.stock:'';el('pUnit').value=p?(p.unit||''):'';
-  el('pCat').value=p?(p.cat||''):(el('stkCat')&&el('stkCat').value||'');el('pMin').value=p&&p.min?p.min:'';
+  el('pStock').value=p&&p.stock?p.stock:'';el('pUnit').value=p?(p.unit||''):'';el('pUnit').placeholder=bizNature().unit;
+  el('pMin').value=p&&p.min?p.min:'';applyNature();
   el('pTrack').checked=p?p.track!==false:true;
   el('pExp').value=p?(p.expiry||''):'';el('pBatch').value=p?(p.batch||''):'';el('pGen').value=p?(p.gen||''):'';
-  el('pMore').open=!!(p&&(p.expiry||p.batch||p.gen));
   el('pExtra').classList.toggle('hidden',!p);el('pDel').classList.toggle('hidden',!p);
   pMargin();el('prodModal').classList.remove('hidden');
   if(!p)setTimeout(()=>{try{el(opts.barcode?'pName':'pName').focus()}catch(e){}},80);
@@ -3690,7 +3768,7 @@ function prodSaveForm(){
   const o2=prodByName(name);if(o2&&o2.id!==id){toast('A product named “'+name+'” already exists',false);return}
   let p=id?prodById(id):null;
   if(!p){p={id:nid(),created:Date.now()};PROD.push(p)}
-  Object.assign(p,{name,barcode:bc,price,cost:+el('pCost').value||0,stock:rnd3(el('pStock').value),unit:el('pUnit').value.trim(),cat:el('pCat').value.trim(),min:+el('pMin').value||0,track:el('pTrack').checked,expiry:el('pExp').value||'',batch:el('pBatch').value.trim(),gen:el('pGen').value.trim(),upd:Date.now(),auto:false});
+  Object.assign(p,{name,barcode:bc,price,cost:+el('pCost').value||0,stock:rnd3(el('pStock').value),unit:el('pUnit').value.trim()||(+el('pStock').value>0||!id?bizNature().unit:''),min:+el('pMin').value||0,track:el('pTrack').checked,expiry:el('pExp').value||'',batch:el('pBatch').value.trim(),gen:el('pGen').value.trim(),upd:Date.now(),auto:false});
   prodPersist();const cb=_prodAfter;_prodAfter=null;
   el('prodModal').classList.add('hidden');renderStock();toast('Product saved',true);
   if(cb)cb(p);
@@ -3904,6 +3982,285 @@ function expAdd(){
 function expDel(id){if(!confirm('Delete this expense?'))return;EXPS=EXPS.filter(x=>x.id!==id);expPersist();renderProfit()}
 
 document.addEventListener('DOMContentLoaded',()=>{PROD=jload(PROD_KEY);EXPS=jload(EXP_KEY);renderStock();storeRestore()});
+
+</script>
+<script>
+/* ================= BARCODE LABELS ================= */
+Object.assign(BIZ_FIELDS,{btype:'bizType',bother:'bizTypeOther'});
+const LBQ_KEY='bizinv_lblq',LBC_KEY='bizinv_lblcfg';
+let LBQ=[],_lbT=0;
+const LB_SIZES={
+  roll48x25:{n:'Roll 58mm printer · 48 × 25 mm',w:48,h:25,roll:true},
+  roll48x35:{n:'Roll 58mm printer · 48 × 35 mm (tall)',w:48,h:35,roll:true},
+  roll38x20:{n:'Roll 58mm printer · 38 × 20 mm (small)',w:38,h:20,roll:true},
+  a4_3x8:{n:'A4 sheet · 3 × 8 (70 × 37 mm)',cols:3,rows:8},
+  a4_4x10:{n:'A4 sheet · 4 × 10 (52 × 30 mm)',cols:4,rows:10},
+  a4_5x13:{n:'A4 sheet · 5 × 13 (42 × 23 mm)',cols:5,rows:13},
+  a4_2x7:{n:'A4 sheet · 2 × 7 (105 × 42 mm)',cols:2,rows:7}
+};
+const LBF={type:'auto',size:'roll48x25',biz:false,name:true,price:true,code:true,txt:'m',extra:'',cut:true,stock:false};
+function lbLoadCfg(){try{Object.assign(LBF,JSON.parse(lsGet(LBC_KEY)||'{}'))}catch(e){}try{const q=JSON.parse(lsGet(LBQ_KEY)||'[]');if(Array.isArray(q))LBQ=q}catch(e){}}
+function lbSave(){lsSet(LBC_KEY,JSON.stringify(LBF));lsSet(LBQ_KEY,JSON.stringify(LBQ))}
+function lbLoadLib(){return new Promise(res=>{if(window.JsBarcode)return res(true);const s=document.createElement('script');s.src='jsbarcode.min.js';s.onload=()=>res(true);s.onerror=()=>res(false);document.head.appendChild(s)})}
+function lbOpts(){return Object.assign({},LBF)}
+function lbStatus(t){const e=el('lbStatus');if(e)e.textContent=t||'';try{setPrStatus(t)}catch(x){}}
+
+/* ---------- entries ---------- */
+function lbResolve(e){
+  if(e.pid){const p=prodById(e.pid);if(!p)return null;return{code:p.barcode||'',title:p.name,price:p.price>0?fmt(p.price):'',copies:e.copies,pid:p.id}}
+  return{code:e.code||'',title:e.title||'',price:e.price||'',copies:e.copies}
+}
+function lbAdd(pid,copies){
+  const p=prodById(pid);if(!p)return;
+  const ex=LBQ.find(x=>x.pid===pid);
+  const n=copies||(LBF.stock?Math.max(1,Math.round(+p.stock||1)):1);
+  if(ex)ex.copies+=n;else LBQ.push({id:nid(),pid,copies:n});
+  lbSave();lbRenderQ();lbPreview();
+}
+function lbAddAll(){
+  const ps=PROD.filter(p=>p.barcode);
+  if(!ps.length){toast('No product has a barcode yet. Tap “Make barcodes for products that have none”.',false);return}
+  if(ps.length>60&&!confirm('Add all '+ps.length+' products to the label list?'))return;
+  ps.forEach(p=>{if(!LBQ.find(x=>x.pid===p.id))LBQ.push({id:nid(),pid:p.id,copies:LBF.stock?Math.max(1,Math.round(+p.stock||1)):1})});
+  lbSave();lbRenderQ();lbPreview();
+}
+function lbGenMissing(){
+  const ps=PROD.filter(p=>!p.barcode);
+  if(!ps.length){toast('Every product already has a barcode',true);return}
+  if(!confirm('Make a new barcode for '+ps.length+' product(s) that have none?'))return;
+  ps.forEach(p=>{p.barcode=genCode();p.upd=Date.now()});prodPersist();renderStock();lbRenderQ();lbPreview();toast('Barcodes made for '+ps.length+' product(s)',true);
+}
+function lbGenOne(id){const p=prodById(id);if(!p)return;p.barcode=genCode();prodPersist();renderStock();lbRenderQ();lbPreview()}
+function lbAddCustom(){
+  const code=el('lbcCode').value.trim();if(!code){toast('Type the barcode text or number first',false);return}
+  LBQ.push({id:nid(),code,title:el('lbcTitle').value.trim(),price:el('lbcPrice').value.trim(),copies:Math.max(1,Math.round(+el('lbcCopies').value||1))});
+  el('lbcCode').value='';el('lbcTitle').value='';el('lbcPrice').value='';el('lbcCopies').value=1;
+  lbSave();lbRenderQ();lbPreview();toast('Label added',true);
+}
+function lbCopies(id,d){const e=LBQ.find(x=>x.id===id);if(!e)return;e.copies=Math.max(1,(e.copies|0)+d);lbSave();lbRenderQ();lbPreview()}
+function lbSetCopies(id,n){const e=LBQ.find(x=>x.id===id);if(!e)return;e.copies=Math.max(1,Math.round(+n||1));lbSave();lbRenderQ();lbPreview()}
+function lbDel(id){LBQ=LBQ.filter(x=>x.id!==id);lbSave();lbRenderQ();lbPreview()}
+function lbClear(){if(LBQ.length&&!confirm('Remove all labels from the list?'))return;LBQ=[];lbSave();lbRenderQ();lbPreview()}
+function lbSuggest(){
+  const q=keyName(el('lbSearch').value),box=el('lbSug');
+  const list=PROD.filter(p=>!q||keyName(p.name).includes(q)||String(p.barcode||'').toLowerCase().includes(q)).sort((a,b)=>String(a.name).localeCompare(String(b.name))).slice(0,8);
+  if(!list.length){box.innerHTML='<div class="hint" style="padding:6px 0">No product found.</div>';return}
+  box.innerHTML=list.map(p=>`<div class="drow" onclick="lbAdd('${p.id}')"><span class="dn" style="width:auto;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span><span style="color:var(--mut);font-size:.7rem">${esc(p.barcode||'no barcode')}</span><span style="font-weight:800">＋</span></div>`).join('');
+}
+function lbRenderQ(){
+  const box=el('lbQueue');let total=0;
+  box.innerHTML=LBQ.length?LBQ.map(e=>{
+    const r=lbResolve(e);if(!r)return'';total+=e.copies;
+    const warn=!r.code?`<span style="color:var(--err);font-weight:700">no barcode</span> <button class="btn b-ghost b-sm" onclick="lbGenOne('${r.pid}')">🎲 make one</button>`:`<span style="font-family:ui-monospace,Menlo,monospace">${esc(r.code)}</span>`;
+    return `<div class="slip"><div class="mid"><strong>${esc(r.title||'(no title)')}${r.price?' · '+esc(r.price):''}</strong><em>${warn}</em></div>
+      <div style="display:flex;align-items:center;gap:4px"><button class="pa" onclick="lbCopies('${e.id}',-1)">−</button><input type="number" min="1" value="${e.copies}" style="width:54px;text-align:center;padding:8px 2px" onchange="lbSetCopies('${e.id}',this.value)"><button class="pa" onclick="lbCopies('${e.id}',1)">＋</button><button class="pa" style="background:#fee2e2" onclick="lbDel('${e.id}')">✕</button></div></div>`}).join(''):'<p class="hint" style="margin:4px 0">No labels yet. Search a product above, or add a custom label.</p>';
+  el('lbCount').textContent=LBQ.length?(total+' label'+(total===1?'':'s')+' in the list'):'';
+}
+
+/* ---------- drawing ---------- */
+const BF_MAP={code128:'CODE128',ean13:'EAN13',ean8:'EAN8',code39:'CODE39'};
+function lbFormat(code,type){
+  if(type==='qr')return'qr';
+  if(type!=='auto')return BF_MAP[type]||'CODE128';
+  return isEan13(code)?'EAN13':'CODE128';
+}
+function lbBars(code,fmt,availW,hPx){
+  const c=document.createElement('canvas');
+  JsBarcode(c,code,{format:fmt,width:1,height:10,displayValue:false,margin:0});
+  const modules=c.width,mod=Math.max(1,Math.floor(availW/(modules+20)));
+  const c2=document.createElement('canvas');
+  JsBarcode(c2,code,{format:fmt,width:mod,height:Math.max(4,Math.round(hPx)),displayValue:false,margin:0});
+  return{canvas:c2,mod,modules};
+}
+function lbWrap(ctx,txt,maxW,maxLines){
+  const words=String(txt).split(/\s+/),lines=[];let cur='';
+  for(const w of words){const t=cur?cur+' '+w:w;if(ctx.measureText(t).width<=maxW||!cur)cur=t;else{lines.push(cur);cur=w}}
+  if(cur)lines.push(cur);
+  if(lines.length>maxLines){lines.length=maxLines;let l=lines[maxLines-1];while(ctx.measureText(l+'…').width>maxW&&l.length>1)l=l.slice(0,-1);lines[maxLines-1]=l+'…'}
+  return lines.map(l=>{while(ctx.measureText(l).width>maxW&&l.length>1)l=l.slice(0,-1);return l});
+}
+const LB_FONT=(s,b)=>(b?'bold ':'')+Math.max(6,Math.round(s))+'px Arial,Helvetica,sans-serif';
+/* Draw one label inside the box (x,y,w,h). Returns {ok,mod,mm} so the caller can warn about unreadable codes. */
+function lbDraw(ctx,E,x,y,w,h,pxmm,o){
+  ctx.save();ctx.fillStyle='#fff';ctx.fillRect(x,y,w,h);ctx.fillStyle='#000';ctx.textBaseline='top';ctx.textAlign='center';
+  const res={ok:true,mod:0,mm:0};
+  const pad=Math.max(3,Math.round(1.2*pxmm)),sc=o.txt==='s'?.85:(o.txt==='l'?1.2:1);
+  const base=Math.min(h*.15,3.4*pxmm)*sc,cw=w-pad*2,bz=(bizGet().name||'').trim();
+  const fmt=lbFormat(E.code,o.type);
+  const fit=(txt,size,bold,maxW)=>{let s=size;ctx.font=LB_FONT(s,bold);while(ctx.measureText(txt).width>maxW&&s>size*.6){s-=.5;ctx.font=LB_FONT(s,bold)}let t=String(txt);while(ctx.measureText(t).width>maxW&&t.length>2)t=t.slice(0,-1);return{t:t===String(txt)?t:t+'…',s}};
+  try{
+    if(fmt==='qr'){
+      const side=Math.min(h-pad*2,Math.floor(w*.5)),tot=qrMatrix(E.code).length+QR_PAD*2,mod=Math.max(1,Math.floor(side/tot)),qs=mod*tot;
+      drawQR(ctx,E.code,x+pad,y+Math.round((h-qs)/2),qs,'#000');
+      res.mod=mod;res.mm=mod/pxmm;
+      const tx0=x+pad+qs+pad,tw=x+w-pad-tx0;ctx.textAlign='left';
+      let ty=y+pad;const lines=[];
+      if(o.biz&&bz)lines.push({t:bz,s:base*.8,b:false});
+      const nm=(o.name&&E.title)?E.title:'';
+      if(nm){ctx.font=LB_FONT(base,true);lbWrap(ctx,nm,tw,3).forEach(l=>lines.push({t:l,s:base,b:true}))}
+      if(o.price&&E.price)lines.push({t:E.price,s:base*1.5,b:true});
+      if(o.code){ctx.font=LB_FONT(base*.75,false);lbWrap(ctx,E.code,tw,2).forEach(l=>lines.push({t:l,s:base*.75,b:false}))}
+      if(o.extra)lines.push({t:o.extra,s:base*.75,b:false});
+      const th=lines.reduce((a,l)=>a+l.s*1.25,0);ty=y+Math.max(pad,(h-th)/2);
+      lines.forEach(l=>{ctx.font=LB_FONT(l.s,l.b);ctx.fillText(l.t,tx0,ty);ty+=l.s*1.25});
+    }else{
+      const top=[],bot=[];
+      const build=(withBiz,withExtra,k)=>{
+        top.length=0;bot.length=0;
+        if(withBiz&&o.biz&&bz)top.push({t:bz,s:base*.78*k,b:false});
+        if(o.name&&E.title){ctx.font=LB_FONT(base*k,true);if(ctx.measureText(E.title).width>cw&&h>=22*pxmm){ctx.font=LB_FONT(base*.85*k,true);lbWrap(ctx,E.title,cw,2).forEach(l=>top.push({t:l,s:base*.85*k,b:true}))}else top.push({t:E.title,s:base*k,b:true})}
+        if(o.code)bot.push({t:E.code,s:base*.85*k,b:false});
+        if(o.price&&E.price)bot.push({t:E.price,s:base*1.5*k,b:true});
+        if(withExtra&&o.extra)bot.push({t:o.extra,s:base*.78*k,b:false});
+        const th=top.reduce((a,l)=>a+l.s*1.2,0)+bot.reduce((a,l)=>a+l.s*1.2,0);
+        return h-pad*2-th-pxmm*1.2;
+      };
+      let barH=build(true,true,1);
+      if(barH<h*.28)barH=build(false,true,1);
+      if(barH<h*.28)barH=build(false,false,1);
+      if(barH<h*.28)barH=build(false,false,.8);
+      const bars=lbBars(E.code,fmt,cw,barH);
+      res.mod=bars.mod;res.mm=bars.mod/pxmm;
+      let ty=y+pad;
+      top.forEach(l=>{const f=fit(l.t,l.s,l.b,cw);ctx.font=LB_FONT(f.s,l.b);ctx.fillText(f.t,x+w/2,ty);ty+=l.s*1.2});
+      ty+=pxmm*.4;
+      ctx.drawImage(bars.canvas,Math.round(x+(w-bars.canvas.width)/2),Math.round(ty));
+      ty+=bars.canvas.height+pxmm*.8;
+      bot.forEach(l=>{const f=fit(l.t,l.s,l.b,cw);ctx.font=LB_FONT(f.s,l.b);ctx.fillText(f.t,x+w/2,ty);ty+=l.s*1.2});
+    }
+  }catch(e){
+    res.ok=false;ctx.fillStyle='#fff';ctx.fillRect(x,y,w,h);ctx.fillStyle='#000';ctx.strokeStyle='#000';ctx.lineWidth=2;ctx.strokeRect(x+2,y+2,w-4,h-4);
+    ctx.textAlign='center';ctx.font=LB_FONT(Math.min(h*.14,3*pxmm),true);
+    lbWrap(ctx,'Cannot make '+String(fmt).toUpperCase()+' from “'+E.code+'”',w-pad*2,4).forEach((l,i)=>ctx.fillText(l,x+w/2,y+pad+i*h*.2));
+  }
+  ctx.restore();return res;
+}
+function lbExpand(){const out=[];LBQ.forEach(e=>{const r=lbResolve(e);if(!r||!r.code)return;for(let i=0;i<Math.max(1,e.copies|0);i++)out.push(r)});return out}
+async function lbBuild(){
+  if(!(await lbLoadLib()))throw new Error('Barcode library not found (jsbarcode.min.js)');
+  const o=lbOpts(),S=LB_SIZES[o.size]||LB_SIZES.roll48x25,list=lbExpand();
+  if(!list.length)throw new Error('Add at least one label with a barcode first.');
+  let bad=0,dense=0,pages=[];
+  const dash=(ctx,x1,y1,x2,y2)=>{ctx.save();ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.setLineDash([6,6]);ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.restore()};
+  if(S.roll){
+    if(list.length>200)throw new Error('That is '+list.length+' labels — print up to 200 at a time on the roll.');
+    const pxmm=8,W=384,lw=Math.round(S.w*pxmm),lh=Math.round(S.h*pxmm),gap=o.cut?8:2,c=mkCanvas(W,list.length*(lh+gap)),ctx=c.getContext('2d');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,W,c.height);
+    list.forEach((E,i)=>{const r=lbDraw(ctx,E,Math.round((W-lw)/2),i*(lh+gap),lw,lh,pxmm,o);if(!r.ok)bad++;else if(r.mm<.2)dense++;if(o.cut)dash(ctx,0,i*(lh+gap)+lh+gap/2,W,i*(lh+gap)+lh+gap/2)});
+    pages=[c];
+    return{pages,roll:true,count:list.length,bad,dense,wmm:58,hmm:Math.round(c.height/pxmm)};
+  }
+  const pxmm=300/25.4,PW=2480,PH=3508,cw=PW/S.cols,ch=PH/S.rows,per=S.cols*S.rows,inset=Math.round(1*pxmm);
+  for(let p0=0;p0<list.length;p0+=per){
+    const c=mkCanvas(PW,PH),ctx=c.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,PW,PH);
+    list.slice(p0,p0+per).forEach((E,i)=>{
+      const col=i%S.cols,row=Math.floor(i/S.cols),x=Math.round(col*cw),y=Math.round(row*ch);
+      const r=lbDraw(ctx,E,x+inset,y+inset,Math.round(cw)-inset*2,Math.round(ch)-inset*2,pxmm,o);if(!r.ok)bad++;else if(r.mm<.2)dense++;
+      if(o.cut){ctx.save();ctx.strokeStyle='#999';ctx.lineWidth=2;ctx.setLineDash([10,10]);ctx.strokeRect(x+1,y+1,Math.round(cw)-2,Math.round(ch)-2);ctx.restore()}
+    });
+    pages.push(c);
+  }
+  return{pages,roll:false,count:list.length,bad,dense,wmm:210,hmm:297};
+}
+/* preview: first label (or a sample) */
+function lbPreview(){
+  clearTimeout(_lbT);_lbT=setTimeout(async()=>{
+    const cv=el('lbPrev');if(!cv)return;
+    if(!(await lbLoadLib())){el('lbMsg').textContent='Barcode library missing (jsbarcode.min.js next to index.html).';return}
+    const o=lbOpts(),S=LB_SIZES[o.size]||LB_SIZES.roll48x25,list=lbExpand();
+    const E=list[0]||{code:'2001234567893',title:'Sample item',price:'Rs 120'};
+    const pxmm=S.roll?8:300/25.4,w=Math.round(S.roll?S.w*pxmm:(2480/S.cols)-2*pxmm),h=Math.round(S.roll?S.h*pxmm:(3508/S.rows)-2*pxmm);
+    cv.width=w;cv.height=h;const r=lbDraw(cv.getContext('2d'),E,0,0,w,h,pxmm,o);
+    const warn=[];
+    if(!r.ok)warn.push('⚠ This code does not fit the chosen barcode type — choose “Auto” or another type.');
+    else if(r.mm<.2)warn.push('⚠ Bars are very thin for this label size — scanners may struggle. Use a bigger label, a shorter code, or QR.');
+    if(!list.length)warn.push('Showing a sample. Add labels to see yours.');
+    el('lbMsg').textContent=warn.join(' ');
+  },120);
+}
+function lbCfgRead(){
+  LBF.type=el('lbType').value;LBF.size=el('lbSize').value;LBF.biz=el('lbBiz').checked;LBF.name=el('lbName').checked;LBF.price=el('lbPrice').checked;LBF.code=el('lbCode').checked;
+  LBF.txt=el('lbTxt').value;LBF.extra=el('lbExtra').value.trim();LBF.cut=el('lbCut').checked;LBF.stock=el('lbStock').checked;
+  lbSave();lbShowBtns();lbPreview();
+}
+function lbShowBtns(){
+  const S=LB_SIZES[LBF.size]||LB_SIZES.roll48x25,roll=!!S.roll;
+  el('lbBtRow').classList.toggle('hidden',!roll);el('lbA4Row').classList.toggle('hidden',roll);
+}
+function lbOpen(pid){
+  lbLoadCfg();
+  el('lbSize').innerHTML=Object.keys(LB_SIZES).map(k=>`<option value="${k}">${LB_SIZES[k].n}</option>`).join('');
+  el('lbType').value=LBF.type;el('lbSize').value=LB_SIZES[LBF.size]?LBF.size:'roll48x25';el('lbBiz').checked=!!LBF.biz;el('lbName').checked=!!LBF.name;el('lbPrice').checked=!!LBF.price;el('lbCode').checked=!!LBF.code;
+  el('lbTxt').value=LBF.txt;el('lbExtra').value=LBF.extra||'';el('lbCut').checked=!!LBF.cut;el('lbStock').checked=!!LBF.stock;
+  el('lbSearch').value='';el('lbSug').innerHTML='';el('lbStatus').textContent='';
+  if(pid)lbAdd(pid,1);
+  lbRenderQ();lbShowBtns();lbPreview();el('prodModal').classList.add('hidden');el('lblModal').classList.remove('hidden');
+}
+function lbFromProduct(id){const p=prodById(id);if(!p)return;if(!p.barcode){p.barcode=genCode();prodPersist();renderStock()}lbOpen(id)}
+function lbClose(){el('lblModal').classList.add('hidden')}
+
+/* ---------- output ---------- */
+function lbDownload(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000)}
+function lbWarn(R){
+  if(R.bad)toast(R.bad+' label(s) have a code that does not fit this barcode type',false);
+  else if(R.dense)toast('Bars are very thin on this size — test-scan one first',false);
+}
+async function lbPrintBt(){
+  const ok=await btEnsure(false);if(!ok)return;
+  try{
+    lbStatus('Preparing labels…');const R=await lbBuild();lbWarn(R);
+    miniLogoRect=null;const c=R.pages[0],mode=v('prMode');
+    lbStatus('Printing '+R.count+' label(s)…');
+    if(mode==='mxw01'){
+      if(!mx)throw new Error('This printer was not detected as Fun Print / MXW01 — pick another Print mode on the Invoice tab');
+      await mxPrint(c,p=>lbStatus('Sending… '+p+'%'));
+    }else{
+      if(!btChar)throw new Error('Printer disconnected');
+      await btWrite((mode==='escstar')?buildRasterEscStar(c):buildRaster(c));
+    }
+    lbStatus('✅ Sent '+R.count+' label(s) to '+(btDev&&btDev.name||'printer')+'. If they print upside down, untick “Rotate 180°” in the printer settings on the Invoice tab.');
+    toast('Labels sent to printer',true);
+  }catch(e){btChar=null;lbStatus('❌ '+(e&&e.message?e.message:e));toast('Label print failed',false)}
+}
+async function lbDownloadPng(){
+  try{const R=await lbBuild();lbWarn(R);R.pages.forEach((c,i)=>c.toBlob(b=>lbDownload('labels_'+localDate(new Date())+(R.pages.length>1?'_p'+(i+1):'')+'.png',b),'image/png'));toast(R.count+' label(s) ready',true)}
+  catch(e){toast(e.message||String(e),false)}
+}
+function pdfFromCanvases(cvs,wmm,hmm){
+  const enc=new TextEncoder(),parts=[],offs=[];let len=0;
+  const push=b=>{if(typeof b==='string')b=enc.encode(b);parts.push(b);len+=b.length};
+  const W=(wmm/25.4*72).toFixed(2),H=(hmm/25.4*72).toFixed(2),n=cvs.length;
+  push('%PDF-1.4\n');
+  offs[1]=len;push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  offs[2]=len;push('2 0 obj\n<< /Type /Pages /Count '+n+' /Kids ['+cvs.map((_,i)=>(3+i*3)+' 0 R').join(' ')+'] >>\nendobj\n');
+  cvs.forEach((c,i)=>{
+    const po=3+i*3,co=po+1,io=po+2;
+    const b64=c.toDataURL('image/jpeg',.92).split(',')[1],bin=atob(b64),jb=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)jb[k]=bin.charCodeAt(k);
+    offs[po]=len;push(po+' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+W+' '+H+'] /Resources << /XObject << /Im0 '+io+' 0 R >> >> /Contents '+co+' 0 R >>\nendobj\n');
+    const cs='q '+W+' 0 0 '+H+' 0 0 cm /Im0 Do Q';
+    offs[co]=len;push(co+' 0 obj\n<< /Length '+cs.length+' >>\nstream\n'+cs+'\nendstream\nendobj\n');
+    offs[io]=len;push(io+' 0 obj\n<< /Type /XObject /Subtype /Image /Width '+c.width+' /Height '+c.height+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+jb.length+' >>\nstream\n');push(jb);push('\nendstream\nendobj\n');
+  });
+  const total=3+n*3,xo=len;
+  push('xref\n0 '+total+'\n0000000000 65535 f \n');
+  for(let i=1;i<total;i++)push(String(offs[i]).padStart(10,'0')+' 00000 n \n');
+  push('trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF\n');
+  return new Blob(parts,{type:'application/pdf'});
+}
+async function lbDownloadPdf(){
+  try{const R=await lbBuild();lbWarn(R);lbDownload('labels_'+localDate(new Date())+'.pdf',pdfFromCanvases(R.pages,R.wmm,R.hmm));toast(R.count+' label(s) on '+R.pages.length+' page(s)',true)}
+  catch(e){toast(e.message||String(e),false)}
+}
+async function lbPrintSystem(){
+  const win=window.open('','_blank');if(!win){alert('Allow pop-ups to print');return}
+  try{
+    const R=await lbBuild();lbWarn(R);
+    const imgs=R.pages.map(c=>'<img src="'+c.toDataURL('image/png')+'">').join('');
+    win.document.write('<html><head><title>Labels</title><style>@page{size:A4;margin:0}body{margin:0}img{display:block;width:210mm;height:297mm;page-break-after:always}</style></head><body>'+imgs+'<script>window.onload=function(){setTimeout(function(){window.print()},400)}<\/script></body></html>');
+    win.document.close();
+  }catch(e){win.close();toast(e.message||String(e),false)}
+}
+document.addEventListener('DOMContentLoaded',()=>{lbLoadCfg();try{bizTypeChanged()}catch(e){}try{renderStock()}catch(e){}});
 
 </script>
 </body>

@@ -1,6 +1,6 @@
 /* Invoice app service worker 20261015a */
-const CACHE = 'inv-app-20261015c';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png', './zxing.min.js'];
+const CACHE = 'inv-app-20261015d';
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png', './zxing.min.js', './jsbarcode.min.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
