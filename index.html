@@ -544,6 +544,8 @@ details.biz summary{font-weight:800;color:var(--navy);font-size:.95rem;cursor:po
   <div class="card">
     <h2><i>⚙️</i><span>Options &amp; backup</span></h2>
     <label class="ck"><input type="checkbox" id="optAuto" onchange="lsSet(AUTOADD_KEY,this.checked?'1':'0')"><span>Remember new items typed on a bill (adds them to Products automatically, without stock counting)</span></label>
+    <label class="ck"><input type="checkbox" id="optOOS" onchange="lsSet(OOS_KEY,this.checked?'1':'0');renderStock()"><span>Allow selling items that are out of stock (not recommended — profit and stock go wrong)</span></label>
+    <label class="ck"><input type="checkbox" id="optExpSell" onchange="lsSet(EXPSELL_KEY,this.checked?'1':'0')"><span>Allow selling expired items</span></label>
     <div class="grid2" style="margin-top:10px">
       <button class="btn b-navy" onclick="storeExport()">⬇️ Save store backup</button>
       <button class="btn b-ghost" onclick="el('storeImportFile').click()">⬆️ Restore backup</button>
@@ -1749,10 +1751,8 @@ function saveAndGenerate(){
   const prevBefore=prevOutFor(c,invNo);
   const _old=(c.invoices||[]).find(i=>i.invNo===invNo&&i.invNo!=='PAY');
   {
-    const oq={},nq={};if(_old)(_old.items||[]).forEach(i=>{if(i.pid)oq[i.pid]=(oq[i.pid]||0)+(+i.qty||0)});
-    items.forEach(i=>{if(i.pid)nq[i.pid]=(nq[i.pid]||0)+i.qty});
-    const short=[];Object.keys(nq).forEach(pid=>{const p=prodById(pid);if(!p||p.track===false)return;const have=(+p.stock||0)+(oq[pid]||0);if(have<nq[pid])short.push(p.name+' (have '+rnd3(have)+', selling '+rnd3(nq[pid])+')')});
-    if(short.length&&!confirm('Not enough stock for:\n'+short.join('\n')+'\n\nSave the invoice anyway?'))return;
+    const prob=saleProblems(items);
+    if(prob.length){beep(false);alert('This bill cannot be saved:\n\n'+prob.join('\n')+'\n\nReduce the quantity or remove the item, or add stock in the Stock tab.');return}
   }
   if(_old)stockApply(_old.items,1);
   stockApply(items,-1);autoAddProducts(items);
@@ -3500,7 +3500,7 @@ function stockApply(items,sign){
 function stockWarn(p,qty){
   if(!p)return;
   if(expState(p)==='expired'){beep(false);toast('⚠ EXPIRED: '+p.name+' ('+p.expiry+')',false);return}
-  if(p.track!==false&&(+p.stock||0)<qty){toast('⚠ Only '+rnd3(p.stock)+' '+(p.unit||'')+' of '+p.name+' in stock',false)}
+  if(p.track!==false&&(+p.stock||0)<qty){toast('⚠ Only '+rnd3(p.stock)+(p.unit?' '+p.unit:'')+' of '+p.name+' in stock',false)}
 }
 function autoAddProducts(items){
   if(lsGet(AUTOADD_KEY)==='0')return;
@@ -3545,6 +3545,55 @@ function applyNature(){
   el('pTitleExp').textContent=n.batch?'Medicine details':'Expiry';
 }
 
+
+/* ---------------- selling rules: no stock = no bill ---------------- */
+const OOS_KEY='bizinv_allow_oos',EXPSELL_KEY='bizinv_allow_expired';
+const allowOOS=()=>lsGet(OOS_KEY)==='1',allowExpired=()=>lsGet(EXPSELL_KEY)==='1';
+/* quantity of this product already saved under the invoice number now on screen (so re-saving an invoice is not blocked by its own stock) */
+function savedQtyFor(pid){
+  const no=v('invNo').trim();let q=0;if(!no)return 0;
+  loadDB().forEach(c=>(c.invoices||[]).forEach(i=>{if(i.invNo===no&&i.invNo!=='PAY')(i.items||[]).forEach(it=>{if(it.pid===pid)q+=+it.qty||0})}));
+  return q;
+}
+const availOf=p=>p.track===false?Infinity:(+p.stock||0)+savedQtyFor(p.id);
+function saleProblems(items){
+  const need={};(items||[]).forEach(i=>{if(i.pid)need[i.pid]=(need[i.pid]||0)+(+i.qty||0)});
+  const out=[];
+  Object.keys(need).forEach(pid=>{
+    const p=prodById(pid);if(!p)return;
+    if(!allowExpired()&&expState(p)==='expired')out.push('⛔ '+p.name+' — EXPIRED ('+p.expiry+')');
+    if(!allowOOS()&&p.track!==false){
+      const a=availOf(p);
+      if(a<=0)out.push('⛔ '+p.name+' — out of stock');
+      else if(a<need[pid])out.push('⛔ '+p.name+' — only '+rnd3(a)+(p.unit?' '+p.unit:'')+' in stock, the bill has '+rnd3(need[pid]));
+    }
+  });
+  return out;
+}
+function saleOK(){
+  const pr=saleProblems(invoiceTotal().items);
+  if(pr.length){beep(false);alert('This bill cannot be made:\n\n'+pr.join('\n')+'\n\nReduce the quantity or remove the item, or add stock in the Stock tab.');return false}
+  return true;
+}
+/* red warning under an item row while typing */
+function rowStockWarn(id){
+  const card=el('item-row-'+id);if(!card)return;
+  let box=el('sw-'+id);if(!box){box=document.createElement('div');box.id='sw-'+id;box.style.cssText='color:var(--err);font-weight:800;font-size:.8rem;margin-top:6px';const pv=el('pvl-'+id);pv.parentNode.insertBefore(box,pv.nextSibling)}
+  const desc=cleanName(v('desc-'+id));let P=card.dataset.pid?prodById(card.dataset.pid):null;
+  if(!P||keyName(P.name)!==keyName(desc))P=prodByName(desc);
+  let msg='';
+  if(P&&v('mode-'+id)==='qp'){
+    const q=+v('qty-'+id)||0;
+    if(!allowExpired()&&expState(P)==='expired')msg='⛔ Expired ('+P.expiry+') — cannot be sold';
+    else if(!allowOOS()&&P.track!==false){
+      const a=availOf(P);
+      if(a<=0)msg='⛔ Out of stock — cannot be sold';
+      else{let tot=0;document.querySelectorAll('#itemsBody .item-card').forEach(r=>{const i=r.id.replace('item-row-','');if(el('mode-'+i)&&v('mode-'+i)==='qp'){let Q=r.dataset.pid?prodById(r.dataset.pid):null;const d=cleanName(v('desc-'+i));if(!Q||keyName(Q.name)!==keyName(d))Q=prodByName(d);if(Q&&Q.id===P.id)tot+=+v('qty-'+i)||0}});if(tot>a)msg='⛔ Only '+rnd3(a)+(P.unit?' '+P.unit:'')+' in stock'}
+    }
+  }
+  box.textContent=msg;card.style.borderColor=msg?'var(--err)':'';
+}
+
 /* ---------------- beep ---------------- */
 let _ac=null;
 function beep(ok){
@@ -3559,6 +3608,15 @@ function billAdd(p,qty){
   qty=qty||1;
   const rows=[...document.querySelectorAll('#itemsBody .item-card')];
   let row=rows.find(r=>r.dataset.pid===p.id&&v('mode-'+r.id.replace('item-row-',''))==='qp'),id;
+  {
+    const msgOf=m=>{beep(false);if(!el('camModal').classList.contains('hidden'))el('camLast').textContent=m;else toast(m,false)};
+    if(!allowExpired()&&expState(p)==='expired'){msgOf('⛔ EXPIRED: '+p.name+' ('+p.expiry+') — not added');return null}
+    if(!allowOOS()&&p.track!==false){
+      const a=availOf(p),cur=row?(+v('qty-'+row.id.replace('item-row-',''))||0):0;
+      if(a<=0){msgOf('⛔ Out of stock: '+p.name+' — not added');return null}
+      if(cur+qty>a){msgOf('⛔ Only '+rnd3(a)+(p.unit?' '+p.unit:'')+' of '+p.name+' in stock');return null}
+    }
+  }
   if(row){id=row.id.replace('item-row-','');el('qty-'+id).value=rnd3((+v('qty-'+id)||0)+qty);calc(id)}
   else{
     const empty=rows.find(r=>{const i=r.id.replace('item-row-','');return !v('desc-'+i).trim()&&!(+v('price-'+i)>0)&&!(+v('lamt-'+i)>0)});
@@ -3586,7 +3644,7 @@ function scanAdd(code,fromCam){
   code=String(code||'').trim();if(!code)return false;
   const p=prodByBarcode(code);
   if(!p){unknownCode(code,fromCam);return false}
-  billAdd(p,1);return true;
+  return !!billAdd(p,1);
 }
 function scanKey(ev){
   if(ev.key!=='Enter')return;ev.preventDefault();
@@ -3703,7 +3761,7 @@ function renderStock(){
   el('stkExp').parentElement.style.display=bizNature().exp?'':'none';
   el('stkNature').textContent='Business type: '+bizTypeName()+' (change it in Business details on the Invoice tab)';
   el('catList').innerHTML=cs.map(c=>`<option>${esc(c)}</option>`).join('');
-  el('optAuto').checked=lsGet(AUTOADD_KEY)!=='0';
+  el('optAuto').checked=lsGet(AUTOADD_KEY)!=='0';el('optOOS').checked=allowOOS();el('optExpSell').checked=allowExpired();
   let val=0,low=0,exp=0;
   PROD.forEach(p=>{if(p.track!==false)val+=Math.max(0,+p.stock||0)*(+p.cost||0);const ss=stockState(p);if(ss)low++;if(expState(p))exp++});
   el('stkCount').textContent=PROD.length;el('stkValue').textContent=fmt(val);el('stkLow').textContent=low;el('stkExp').textContent=exp;
@@ -3982,6 +4040,16 @@ function expAdd(){
 function expDel(id){if(!confirm('Delete this expense?'))return;EXPS=EXPS.filter(x=>x.id!==id);expPersist();renderProfit()}
 
 document.addEventListener('DOMContentLoaded',()=>{PROD=jload(PROD_KEY);EXPS=jload(EXP_KEY);renderStock();storeRestore()});
+
+/* gate every way of producing an invoice: no stock = no invoice */
+(function(){
+  ['downloadMini','downloadNormal','printMini','printDirect','shareInvoiceWA','shareInvoiceWAImages'].forEach(n=>{
+    const f=window[n];if(typeof f!=='function')return;
+    window[n]=function(){if(!saleOK())return;return f.apply(this,arguments)};
+  });
+  const c0=window.calc;
+  window.calc=function(id){c0(id);try{rowStockWarn(id)}catch(e){}};
+})();
 
 </script>
 <script>

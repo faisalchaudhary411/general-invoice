@@ -41,3 +41,6 @@ Suppliers tab: add the people you buy from, save slips (photo, date, amount, pai
 - **Business details > Business type** (General store, Grocery, Pharmacy, Electric & Hardware, Mobile, Garments, Cosmetics, Stationery, Other). Asked once. It decides which product fields appear (pharmacy: expiry, batch, generic name; grocery/general/cosmetics: expiry; others: none) and the default unit. There is no per-item category box any more (a category column can still be imported from CSV).
 - **Stock > Print barcode labels**: pick products or make custom labels (any text), set copies (or copies = stock), barcode type (Auto, Code 128, EAN-13, EAN-8, Code 39, QR), size (58mm roll 48x25 / 48x35 / 38x20, or A4 sheets 3x8, 4x10, 5x13, 2x7), what to show (business name, product name, price, code number, extra line), cut lines. Print on the Bluetooth printer, or download PNG (roll) / PDF + system print (A4).
 - Keep `jsbarcode.min.js` and `zxing.min.js` next to index.html.
+
+## Selling rules
+- A bill with an out-of-stock or not-enough-stock item cannot be saved, printed, downloaded or shared, and the scanner will not add it. Expired items are blocked the same way. Both can be allowed in Stock > Options & backup (not recommended).
