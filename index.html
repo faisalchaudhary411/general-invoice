@@ -1340,6 +1340,21 @@ function mergeDel(r){
   saveDel(d);
 }
 function invKey(i){return i.invNo==='PAY'?'PAY|'+i.ts:String(i.invNo)}
+/* invoices whose stock was taken off on THIS device — only these get stock back when a sync deletes them (stock is not synced, so this avoids double counting) */
+const STOCKED_KEY='bizinv_stocked';
+function stockedGet(){try{return JSON.parse(localStorage.getItem(STOCKED_KEY)||'{}')||{}}catch(e){return{}}}
+function stockedSet(o){try{localStorage.setItem(STOCKED_KEY,JSON.stringify(o))}catch(e){}}
+function stockedMark(key,on){const o=stockedGet();if(on)o[key]=1;else delete o[key];stockedSet(o)}
+function stockRestoreRemoved(orig,kept){
+  const keep=new Set((kept||[]).map(invKey)),o=stockedGet();let ch=false;
+  (orig||[]).forEach(i=>{
+    if(!i||i.invNo==='PAY')return;const k=invKey(i);
+    if(keep.has(k)||!o[k])return;
+    try{stockApply(i.items,1)}catch(e){}
+    delete o[k];ch=true;
+  });
+  if(ch)stockedSet(o);
+}
 function digits(x){return String(x||'').replace(/\D/g,'')}
 function custKey(c){return (c.name||'').trim().toLowerCase()}
 function applyDeletes(db){
@@ -1349,6 +1364,7 @@ function applyDeletes(db){
     let inv=c.invoices||[],ch=false;
     if(t){const f=inv.filter(i=>(i.ts||0)>t);if(f.length!==inv.length){inv=f;ch=true}}
     const f2=inv.filter(i=>!D.i[invKey(i)]);if(f2.length!==inv.length){inv=f2;ch=true}
+    stockRestoreRemoved(c.invoices||[],inv);
     if(t&&!inv.length)return; // deleted customer
     out.push(ch?recompute(Object.assign({},c,{invoices:inv})):c);
   });
@@ -1755,7 +1771,7 @@ function saveAndGenerate(){
     if(prob.length){beep(false);alert('This bill cannot be saved:\n\n'+prob.join('\n')+'\n\nReduce the quantity or remove the item, or add stock in the Stock tab.');return}
   }
   if(_old)stockApply(_old.items,1);
-  stockApply(items,-1);autoAddProducts(items);
+  stockApply(items,-1);stockedMark(invNo,true);autoAddProducts(items);
   c.invoices=(c.invoices||[]).filter(i=>!(i.invNo===invNo&&i.invNo!=='PAY'));
   c.invoices.unshift(inv);recompute(c);
   {const D=loadDel();if(D.i[invNo]){delete D.i[invNo];saveDel(D)}}
@@ -1864,6 +1880,7 @@ function loadCustToInv(id){
 function delCust(id){
   if(!confirm(lang==='ur'?'گاہک حذف کریں؟':'Delete customer?'))return;
   const db=loadDB(),c=db.find(x=>x.id===id),D=loadDel(),now=Date.now();
+  if(c)(c.invoices||[]).forEach(i=>{if(i.invNo!=='PAY'){try{stockApply(i.items,1)}catch(e){}stockedMark(invKey(i),false)}});
   D.c[id]=now;if(c)D.c['n:'+custKey(c)+'|'+digits(c.phone)]=now;saveDel(D);
   saveDB(db.filter(x=>x.id!==id));renderCustList();updatePrev();try{syncPushDebounced()}catch(e){}
 }
@@ -1886,6 +1903,7 @@ function delInv(cid,keyEnc){
   if(!confirm((lang==='ur'?'حذف کریں؟ ':'Delete ')+(i.invNo==='PAY'?'payment '+fmt(i.advance||0):'invoice '+i.invNo+' ('+fmt(i.total||0)+')')+'?'))return;
   const D=loadDel();D.i[key]=Date.now();saveDel(D);
   try{stockApply(i.items,1)}catch(e){}
+  stockedMark(key,false);
   c.invoices=(c.invoices||[]).filter(x=>invKey(x)!==key);recompute(c);
   saveDB(db);renderCustList();updatePrev();toast(lang==='ur'?'حذف ہو گیا':'Deleted',true);try{syncPushDebounced()}catch(e){}
 }
@@ -3634,7 +3652,16 @@ function billAdd(p,qty){
   else{try{row.scrollIntoView({block:'center',behavior:'smooth'})}catch(e){}toast(msg,true)}
   return row;
 }
+/* true when a numeric code is EAN-8 / UPC-A / EAN-13 length but its check digit is wrong = scanner read only part of it or misread it */
+function codeIncomplete(c){
+  c=String(c||'').trim();
+  if(!/^\d+$/.test(c)||![8,12,13].includes(c.length))return false;
+  const d=c.split('').map(Number),chk=d.pop();let sum=0;
+  for(let i=d.length-1,w=3;i>=0;i--,w=(w===3?1:3))sum+=d[i]*w;
+  return (10-sum%10)%10!==chk;
+}
 function unknownCode(code,fromCam){
+  if(codeIncomplete(code)){beep(false);toast('Barcode not read fully ('+code+') — please scan again',false);return}
   beep(false);
   if(fromCam){camClose();_resumeCam=true}
   toast('New barcode '+code+' — add it as a product',false);
@@ -3669,7 +3696,7 @@ document.addEventListener('keydown',e=>{
     }
     return;
   }
-  const now=Date.now();if(now-_kt>80)_kb='';_kt=now;
+  const now=Date.now();if(now-_kt>200)_kb='';_kt=now;
   if(e.key==='Enter'){if(_kb.length>=4){beep();scanAdd(_kb)}_kb='';return}
   if(e.key&&e.key.length===1)_kb+=e.key;
 });
@@ -3695,7 +3722,7 @@ function zxDecodeCanvas(c,reader){
 }
 async function camOpen(mode,cb){
   if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){toast('Camera needs the https link of the app (not a downloaded file).',false);return}
-  CAM.mode=mode;CAM.cb=cb||null;CAM.last='';CAM.lastCode='';
+  CAM.mode=mode;CAM.cb=cb||null;CAM.last='';CAM.lastCode='';CAM.pend=null;
   el('camModal').classList.remove('hidden');el('camLast').textContent='';
   el('camPlus').classList.toggle('hidden',mode!=='bill');
   el('camMsg').textContent='Starting camera…';
@@ -3736,6 +3763,12 @@ function camLoop(){
 }
 function camGot(code){
   const now=Date.now();
+  if(!prodByBarcode(code)){
+    const say=m=>{el('camLast').textContent=m};
+    if(codeIncomplete(code)){CAM.pend=null;say('⚠ Partial read — hold steady and keep the whole barcode in view');return}
+    if(!(CAM.pend&&CAM.pend.code===code&&now-CAM.pend.t<3000)){CAM.pend={code,t:now};say('Reading… hold steady');return}
+    CAM.pend=null;
+  }
   if(code===CAM.last&&now-CAM.lastT<1000){CAM.lastT=now;return}
   CAM.last=code;CAM.lastT=now;CAM.lastCode=code;
   if(CAM.mode==='bill'){beep();scanAdd(code,true)}
